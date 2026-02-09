@@ -10,8 +10,8 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 const { width, height } = Dimensions.get('window');
 
 // --- 1. KONFIGURASI DATABASE ---
-const SUPABASE_URL = 'https://znznfrlhmhelxnfymbtv.supabase.co'; 
-const SUPABASE_ANON_KEY = 'sb_publishable_tQ8yXAL1-0WewmajYe0rYg_fIUU9LTq';
+const SUPABASE_URL = 'url masing-masing'; 
+const SUPABASE_ANON_KEY = 'key masing-masing';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 export default function HomeScreen() {
