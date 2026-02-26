@@ -2,7 +2,8 @@ import React, { useState, useEffect } from 'react';
 import { 
   Text, View, StyleSheet, TouchableOpacity, FlatList, 
   Image, ActivityIndicator, SafeAreaView, ScrollView, 
-  StatusBar, Dimensions, Alert, TextInput, Modal
+  StatusBar, Dimensions, Alert, TextInput, Modal,
+  KeyboardAvoidingView, Platform, Linking 
 } from 'react-native';
 import { createClient } from '@supabase/supabase-js';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -10,221 +11,307 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 const { width, height } = Dimensions.get('window');
 
 // --- 1. KONFIGURASI DATABASE ---
-const SUPABASE_URL = 'url masing-masing'; 
-const SUPABASE_ANON_KEY = 'key masing-masing';
+const SUPABASE_URL = 'gunakan url masing-masing'; 
+const SUPABASE_ANON_KEY = 'gunakan key masing-masing';
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-export default function HomeScreen() {
+export default function App() {
   const [role, setRole] = useState<null | 'customer' | 'owner'>(null); 
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
+  const [orders, setOrders] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [activeTab, setActiveTab] = useState<'products' | 'orders'>('products'); 
   
-  // State Modul 04 (Search & Login)
-  const [selectedCategory, setSelectedCategory] = useState('Semua');
-  const [searchQuery, setSearchQuery] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
+  // State Owner
+  const [editProdVisible, setEditProdVisible] = useState(false);
+  const [editingProduct, setEditingProduct] = useState<any>({});
+  const [isAdding, setIsAdding] = useState(false);
 
-  // State Modul 04 (Detail Produk)
+  // State Pelanggan
+  const [selectedCategory, setSelectedCategory] = useState('Semua');
   const [selectedProduct, setSelectedProduct] = useState<any>(null);
   const [detailVisible, setDetailVisible] = useState(false);
+  const [cart, setCart] = useState<any[]>([]);
+  const [cartVisible, setCartVisible] = useState(false);
+
+  // State Form
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [buyerName, setBuyerName] = useState('');
+  const [buyerPhone, setBuyerPhone] = useState('');
 
   const categories = ['Semua', 'Camilan', 'Pakaian', 'Sambal', 'Aksesoris', 'Minuman', 'Kesehatan'];
+  const OWNER_WHATSAPP = '6281220042270'; 
 
   useEffect(() => { fetchProducts(); }, []);
+  useEffect(() => { if (role === 'owner' && isLoggedIn) fetchOrders(); }, [role, isLoggedIn, activeTab]);
 
   const fetchProducts = async () => {
     setLoading(true);
     try {
-      const { data, error } = await supabase.from('products').select('*');
+      const { data, error } = await supabase.from('products').select('*').order('id', { ascending: true });
       if (error) throw error;
       setProducts(data || []);
-    } catch (e: any) { console.log("Error:", e.message); }
+    } catch (e: any) { console.log(e.message); }
     finally { setLoading(false); }
   };
 
-  const filteredProducts = products.filter(item => {
-    const matchesCategory = selectedCategory === 'Semua' || item.category === selectedCategory;
-    const matchesSearch = item.name.toLowerCase().includes(searchQuery.toLowerCase());
-    return matchesCategory && matchesSearch;
-  });
-
-  const handleLogin = () => {
-    if (email.trim() === 'admin@umkm.com' && password === '123456') {
-      setIsLoggedIn(true);
-    } else {
-      Alert.alert("Akses Ditolak", "Email atau Password salah!");
-    }
+  const fetchOrders = async () => {
+    setLoading(true);
+    try {
+      const { data, error } = await supabase.from('orders').select('*').order('id', { ascending: false });
+      if (error) throw error;
+      setOrders(data || []);
+    } catch (e: any) { console.log(e.message); }
+    finally { setLoading(false); }
   };
 
-  const handleLogout = () => {
-    setRole(null);
-    setIsLoggedIn(false);
-    setEmail('');
-    setPassword('');
+  // --- LOGIKA CRUD OWNER ---
+  const handleSaveProduct = async () => {
+    if (!editingProduct.name || !editingProduct.price) return Alert.alert("Lengkapi Data");
+    setLoading(true);
+    try {
+      if (isAdding) {
+        const payload = {
+          name: editingProduct.name,
+          price: parseInt(editingProduct.price),
+          image_url: editingProduct.image_url || 'https://via.placeholder.com/150',
+          category: editingProduct.category || 'Semua',
+          is_active: true
+        };
+        const { error } = await supabase.from('products').insert([payload]);
+        if (error) throw error;
+        Alert.alert("Sukses", "Produk baru ditambah!");
+      } else {
+        const { error } = await supabase.from('products').update({ 
+          name: editingProduct.name, 
+          price: parseInt(editingProduct.price),
+          image_url: editingProduct.image_url,
+          category: editingProduct.category
+        }).eq('id', editingProduct.id);
+        if (error) throw error;
+        Alert.alert("Sukses", "Produk diperbarui!");
+      }
+      setEditProdVisible(false);
+      fetchProducts();
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setLoading(false); }
   };
 
-  // --- UI COMPONENTS ---
+  const toggleProductStatus = async (id: number, currentStatus: boolean) => {
+    await supabase.from('products').update({ is_active: !currentStatus }).eq('id', id);
+    fetchProducts();
+  };
 
-  const ProductDetailModal = () => (
-    <Modal animationType="slide" transparent={true} visible={detailVisible} onRequestClose={() => setDetailVisible(false)}>
-      <View style={styles.modalOverlay}>
-        <View style={styles.modalContent}>
-          <TouchableOpacity style={styles.closeBtn} onPress={() => setDetailVisible(false)}>
-            <MaterialCommunityIcons name="close" size={28} color="#2C3E50" />
-          </TouchableOpacity>
-          {selectedProduct && (
-            <ScrollView showsVerticalScrollIndicator={false}>
-              <Image source={{ uri: selectedProduct.image_url }} style={styles.detailImg} />
-              <View style={styles.detailInfo}>
-                <View style={styles.detailBadge}><Text style={styles.detailBadgeText}>{selectedProduct.category}</Text></View>
-                <Text style={styles.detailName}>{selectedProduct.name}</Text>
-                <Text style={styles.detailPrice}>Rp {selectedProduct.price.toLocaleString('id-ID')}</Text>
-                <Text style={styles.detailDesc}>Produk unggulan mitra UMKM Hub dengan kualitas terjamin.</Text>
-                <TouchableOpacity style={styles.mainBtn} onPress={() => Alert.alert("Pesanan", "Menghubungkan ke Penjual...")}>
-                  <MaterialCommunityIcons name="whatsapp" size={20} color="#fff" style={{marginRight: 8}} />
-                  <Text style={styles.mainBtnText}>Beli Sekarang</Text>
-                </TouchableOpacity>
-              </View>
-            </ScrollView>
-          )}
-        </View>
-      </View>
-    </Modal>
-  );
+  const deleteProduct = (id: number) => {
+    Alert.alert("Hapus Produk", "Yakin hapus?", [
+      { text: "Batal" },
+      { text: "Hapus", onPress: async () => { await supabase.from('products').delete().eq('id', id); fetchProducts(); }}
+    ]);
+  };
 
-  if (role === 'owner' && isLoggedIn) {
-    return (
-      <SafeAreaView style={styles.safeArea}>
-        <View style={styles.navBar}>
-          <Text style={styles.brandText}>Owner Dashboard</Text>
-          <TouchableOpacity onPress={handleLogout}><Text style={{color: '#E74C3C', fontWeight: 'bold'}}>Keluar</Text></TouchableOpacity>
-        </View>
-        <ScrollView style={{padding: 20}}>
-          <View style={styles.statsRow}>
-            <View style={styles.statCard}><Text style={styles.statNum}>{products.length}</Text><Text style={styles.statLabel}>Produk</Text></View>
-            <View style={styles.statCard}><Text style={styles.statNum}>24</Text><Text style={styles.statLabel}>Pesanan</Text></View>
-          </View>
-          <View style={styles.dummyChart}><Text style={{color: '#95A5A6'}}>Statistik Penjualan (Modul 08)</Text></View>
-        </ScrollView>
-      </SafeAreaView>
-    );
-  }
+  const deleteOrder = (id: number) => {
+    Alert.alert("Konfirmasi Hapus", "Yakin ingin menghapus riwayat pesanan ini?", [
+      { text: "Batal", style: "cancel" },
+      { text: "Hapus", style: "destructive", onPress: async () => { 
+          await supabase.from('orders').delete().eq('id', id);
+          fetchOrders(); 
+      }}
+    ]);
+  };
 
-  if (role === 'owner' && !isLoggedIn) {
-    return (
-      <View style={styles.landingContainer}>
-        <Text style={styles.landingTitle}>Login Pemilik</Text>
-        <View style={styles.inputGroup}>
-          <TextInput style={styles.formInput} placeholder="Email (admin@umkm.com)" value={email} onChangeText={setEmail} autoCapitalize="none" />
-          <TextInput style={styles.formInput} placeholder="Password (123456)" value={password} onChangeText={setPassword} secureTextEntry />
-        </View>
-        <TouchableOpacity style={styles.mainBtn} onPress={handleLogin}><Text style={styles.mainBtnText}>Masuk Dashboard</Text></TouchableOpacity>
-        <TouchableOpacity style={styles.backLink} onPress={() => setRole(null)}><Text style={styles.backLinkText}>Kembali</Text></TouchableOpacity>
-      </View>
-    );
-  }
+  // --- LOGIKA WHATSAPP (+62) ---
+  const chatCustomer = (phone: string) => {
+    let formattedPhone = phone;
+    if (phone.startsWith('0')) formattedPhone = '62' + phone.slice(1);
+    else if (phone.startsWith('+')) formattedPhone = phone.replace('+', '');
+    Linking.openURL(`whatsapp://send?phone=${formattedPhone}`).catch(() => Alert.alert("Gagal buka WA"));
+  };
 
+  // --- LOGIKA KERANJANG ---
+  const updateQuantity = (id: number, type: 'plus' | 'minus') => {
+    setCart(prev => prev.map(item => item.id === id ? { ...item, quantity: type === 'plus' ? item.quantity + 1 : Math.max(1, item.quantity - 1) } : item));
+  };
+
+  const calculateTotal = () => cart.reduce((total, item) => total + (item.price * item.quantity), 0);
+
+  const handleCheckout = async () => {
+    if (!buyerName || !buyerPhone) return Alert.alert("Lengkapi Data");
+    setLoading(true);
+    try {
+      const total = calculateTotal();
+      const { error } = await supabase.from('orders').insert([{ customer_name: buyerName, phone_number: buyerPhone, items: cart, total_price: total, status: 'Baru' }]);
+      if (error) throw error;
+      
+      let msg = `Halo Owner, saya ${buyerName}. Pesanan:\n` + cart.map(i => `- ${i.name} (${i.quantity}x)`).join('\n');
+      Linking.openURL(`whatsapp://send?phone=${OWNER_WHATSAPP}&text=${encodeURIComponent(msg)}`);
+      
+      setCart([]); setBuyerName(''); setBuyerPhone(''); setCartVisible(false); setRole(null);
+    } catch (e: any) { Alert.alert("Error", e.message); }
+    finally { setLoading(false); }
+  };
+
+  // --- RENDERING ---
   if (!role) {
     return (
-      <View style={styles.landingContainer}>
-        <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/609/609803.png' }} style={styles.landingLogo} />
-        <Text style={styles.landingTitle}>UMKM HUB</Text>
-        <View style={styles.buttonGroup}>
-          <TouchableOpacity style={styles.mainBtn} onPress={() => setRole('customer')}><Text style={styles.mainBtnText}>Pelanggan</Text></TouchableOpacity>
-          <TouchableOpacity style={[styles.mainBtn, {backgroundColor: '#fff', borderWidth: 2, borderColor: '#3498DB', marginTop: 10}]} onPress={() => setRole('owner')}><Text style={{color: '#3498DB', fontWeight: 'bold'}}>Pemilik Usaha</Text></TouchableOpacity>
-        </View>
+      <View style={styles.center}>
+        <Image source={{ uri: 'https://cdn-icons-png.flaticon.com/512/609/609803.png' }} style={{width:80, height:80, marginBottom:20}} />
+        <Text style={styles.title}>UMKM HUB</Text>
+        <TouchableOpacity style={styles.btn} onPress={() => setRole('customer')}><Text style={styles.btnText}>Pelanggan</Text></TouchableOpacity>
+        <TouchableOpacity style={[styles.btn, {backgroundColor:'#34495E'}]} onPress={() => setRole('owner')}><Text style={styles.btnText}>Pemilik Usaha</Text></TouchableOpacity>
       </View>
     );
   }
 
   return (
-    <SafeAreaView style={styles.safeArea}>
+    <SafeAreaView style={styles.container}>
       <StatusBar barStyle="dark-content" />
-      <ProductDetailModal />
-      <View style={styles.navBar}>
-        <Text style={styles.brandText}>UMKM HUB ✨</Text>
-        <TouchableOpacity onPress={() => setRole(null)}><MaterialCommunityIcons name="logout" size={24} color="#E74C3C" /></TouchableOpacity>
-      </View>
+      
+      {/* 1. MODAL DETAIL PRODUK */}
+      <Modal visible={detailVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}><View style={[styles.modalContent, {height:height*0.75}]}>
+          <TouchableOpacity onPress={()=>setDetailVisible(false)} style={{alignSelf:'flex-end'}}><MaterialCommunityIcons name="close" size={28}/></TouchableOpacity>
+          {selectedProduct && (<ScrollView><Image source={{uri: selectedProduct.image_url}} style={styles.detailImg}/><Text style={styles.detailName}>{selectedProduct.name}</Text><Text style={styles.detailPrice}>Rp {selectedProduct.price.toLocaleString()}</Text><Text style={styles.detailDesc}>{selectedProduct.description || "Produk berkualitas mitra UMKM HUB."}</Text>
+          <TouchableOpacity style={styles.btn} onPress={()=>{setCart([...cart, {...selectedProduct, quantity:1}]); setDetailVisible(false);}}><Text style={styles.btnText}>Tambah ke Keranjang</Text></TouchableOpacity></ScrollView>)}
+        </View></View>
+      </Modal>
 
-      <View style={styles.searchContainer}>
-        <MaterialCommunityIcons name="magnify" size={20} color="#95A5A6" />
-        <TextInput style={styles.searchInput} placeholder="Cari produk..." value={searchQuery} onChangeText={setSearchQuery} />
-      </View>
+      {/* 2. MODAL EDIT/TAMBAH OWNER */}
+      <Modal visible={editProdVisible} transparent animationType="fade">
+        <View style={styles.modalOverlay}><View style={styles.modalContent}>
+          <Text style={styles.modalTitle}>{isAdding ? 'Tambah Produk' : 'Edit Produk'}</Text>
+          <TextInput style={styles.input} placeholder="Nama Produk" value={editingProduct?.name} onChangeText={t=>setEditingProduct({...editingProduct, name:t})}/>
+          <TextInput style={styles.input} placeholder="Harga" value={editingProduct?.price?.toString()} onChangeText={t=>setEditingProduct({...editingProduct, price:t})} keyboardType="numeric"/>
+          <TextInput style={styles.input} placeholder="Link Gambar (URL)" value={editingProduct?.image_url} onChangeText={t=>setEditingProduct({...editingProduct, image_url:t})}/>
+          <TextInput style={styles.input} placeholder="Kategori" value={editingProduct?.category} onChangeText={t=>setEditingProduct({...editingProduct, category:t})}/>
+          <TouchableOpacity style={styles.btn} onPress={handleSaveProduct}><Text style={styles.btnText}>Simpan Data</Text></TouchableOpacity>
+          <TouchableOpacity onPress={()=>setEditProdVisible(false)} style={{marginTop:15}}><Text style={{textAlign:'center', color:'red'}}>Batal</Text></TouchableOpacity>
+        </View></View>
+      </Modal>
 
-      <View style={{height: 50}}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal: 20}}>
-          {categories.map((cat) => (
-            <TouchableOpacity key={cat} onPress={() => setSelectedCategory(cat)} style={[styles.catChip, selectedCategory === cat && styles.catChipActive]}>
-              <Text style={[styles.catChipText, selectedCategory === cat && styles.catChipTextActive]}>{cat}</Text>
-            </TouchableOpacity>
-          ))}
-        </ScrollView>
-      </View>
-
-      {loading ? <ActivityIndicator size="large" color="#3498DB" style={{flex: 1}} /> : (
-        <FlatList
-          data={filteredProducts}
-          numColumns={2}
-          keyExtractor={(item) => item.id.toString()}
-          columnWrapperStyle={styles.columnWrapper}
-          contentContainerStyle={styles.listPadding}
-          renderItem={({ item }) => (
-            <TouchableOpacity style={styles.pCard} onPress={() => { setSelectedProduct(item); setDetailVisible(true); }}>
-              <Image source={{ uri: item.image_url }} style={styles.pImg} />
-              <View style={styles.pContent}>
-                <Text style={styles.pName} numberOfLines={1}>{item.name}</Text>
-                <Text style={styles.pPrice}>Rp {item.price.toLocaleString('id-ID')}</Text>
+      {/* 3. MODAL KERANJANG */}
+      <Modal visible={cartVisible} transparent animationType="slide">
+        <KeyboardAvoidingView behavior={Platform.OS === "ios" ? "padding" : "height"} style={styles.modalOverlay}>
+          <View style={[styles.modalContent, {height: height*0.85}]}>
+            <View style={styles.modalHeader}><Text style={styles.modalTitle}>Keranjang 🛒</Text><TouchableOpacity onPress={()=>setCartVisible(false)}><MaterialCommunityIcons name="close" size={28}/></TouchableOpacity></View>
+            <FlatList data={cart} keyExtractor={(item)=>item.id.toString()} renderItem={({item})=>(
+              <View style={styles.cartItem}>
+                <View style={{flex:1}}><Text style={{fontWeight:'bold'}}>{item.name}</Text><Text>Rp {item.price.toLocaleString()}</Text></View>
+                <View style={styles.qtyBox}>
+                  <TouchableOpacity onPress={()=>updateQuantity(item.id, 'minus')} style={styles.qtyBtn}><MaterialCommunityIcons name="minus" color="#FFF" size={16}/></TouchableOpacity>
+                  <Text style={{marginHorizontal:10}}>{item.quantity}</Text>
+                  <TouchableOpacity onPress={()=>updateQuantity(item.id, 'plus')} style={styles.qtyBtn}><MaterialCommunityIcons name="plus" color="#FFF" size={16}/></TouchableOpacity>
+                </View>
+                <TouchableOpacity onPress={()=>setCart(cart.filter(c=>c.id!==item.id))} style={{marginLeft:10}}><MaterialCommunityIcons name="delete" color="red" size={26}/></TouchableOpacity>
               </View>
+            )} ListHeaderComponent={<View style={styles.formSection}><TextInput style={styles.input} placeholder="Nama Anda" value={buyerName} onChangeText={setBuyerName}/><TextInput style={styles.input} placeholder="WhatsApp 0812..." value={buyerPhone} onChangeText={setBuyerPhone} keyboardType="phone-pad"/></View>}
+            ListFooterComponent={<View style={{marginTop:20}}><View style={styles.totalRow}><Text style={{fontSize:18, fontWeight:'bold'}}>Total:</Text><Text style={styles.totalVal}>Rp {calculateTotal().toLocaleString()}</Text></View><TouchableOpacity style={styles.checkoutBtn} onPress={handleCheckout}><Text style={styles.btnText}>Checkout & WA Owner</Text></TouchableOpacity></View>} />
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* NAVBAR */}
+      <View style={styles.navBar}>
+        <Text style={styles.brand}>{role==='owner'?'Admin Hub':'UMKM HUB ✨'}</Text>
+        <View style={{flexDirection:'row', alignItems:'center'}}>
+          {role==='customer' && <TouchableOpacity onPress={()=>setCartVisible(true)} style={{marginRight:15}}><MaterialCommunityIcons name="cart" size={28} color="#3498DB" />{cart.length > 0 && <View style={styles.badge}><Text style={styles.badgeTxt}>{cart.length}</Text></View>}</TouchableOpacity>}
+          <TouchableOpacity onPress={()=>{setRole(null); setIsLoggedIn(false)}}><MaterialCommunityIcons name="logout" size={28} color="red"/></TouchableOpacity>
+        </View>
+      </View>
+
+      {role === 'owner' && isLoggedIn ? (
+        <View style={{flex:1}}>
+          <View style={styles.tabBar}>
+            <TouchableOpacity onPress={()=>setActiveTab('products')} style={[styles.tab, activeTab==='products' && styles.tabActive]}><Text style={activeTab==='products' && {fontWeight:'bold', color:'#3498DB'}}>Katalog</Text></TouchableOpacity>
+            <TouchableOpacity onPress={()=>setActiveTab('orders')} style={[styles.tab, activeTab==='orders' && styles.tabActive]}><Text style={activeTab==='orders' && {fontWeight:'bold', color:'#3498DB'}}>Pesanan</Text></TouchableOpacity>
+          </View>
+          {activeTab === 'products' && (
+            <TouchableOpacity style={styles.btnAddProd} onPress={()=>{setEditingProduct({}); setIsAdding(true); setEditProdVisible(true)}}>
+              <MaterialCommunityIcons name="plus-box" size={20} color="#FFF"/><Text style={{color:'#FFF', fontWeight:'bold', marginLeft:5}}>Tambah Produk Baru</Text>
             </TouchableOpacity>
           )}
-        />
+          <FlatList data={activeTab==='products' ? products : orders} keyExtractor={i=>i.id.toString()} renderItem={activeTab==='products' ? ({item})=>(
+            <View style={styles.adminCard}>
+              <Text style={{flex:1, fontWeight:'bold', color: item.is_active ? '#000' : '#AAA'}}>{item.name} {!item.is_active && '(Mati)'}</Text>
+              <TouchableOpacity onPress={()=>toggleProductStatus(item.id, item.is_active)} style={{marginRight:15}}><MaterialCommunityIcons name={item.is_active ? "eye" : "eye-off"} size={26} color={item.is_active ? "green" : "gray"}/></TouchableOpacity>
+              <TouchableOpacity onPress={()=>{setEditingProduct(item); setIsAdding(false); setEditProdVisible(true)}} style={{marginRight:15}}><MaterialCommunityIcons name="pencil" size={26} color="blue"/></TouchableOpacity>
+              <TouchableOpacity onPress={()=>deleteProduct(item.id)}><MaterialCommunityIcons name="trash-can" size={26} color="red"/></TouchableOpacity>
+            </View>
+          ) : ({item})=>(
+            <View style={styles.orderCard}>
+              <View style={styles.orderHeader}>
+                <View style={{flexDirection: 'row', alignItems: 'center'}}>
+                  <MaterialCommunityIcons name={item.status === 'Selesai' ? "check-circle" : "plus-circle"} size={22} color={item.status === 'Selesai' ? "#27AE60" : "#3498DB"} />
+                  <Text style={{fontWeight:'bold', fontSize:16, marginLeft:8}}>{item.customer_name}</Text>
+                </View>
+                <TouchableOpacity onPress={()=>deleteOrder(item.id)}><MaterialCommunityIcons name="delete-circle" color="red" size={28}/></TouchableOpacity>
+              </View>
+              <Text style={{color: item.status === 'Selesai' ? 'green' : '#3498DB', fontWeight:'bold'}}>{item.status || 'Baru'}</Text>
+              <Text>Rp {item.total_price.toLocaleString()}</Text>
+              <View style={styles.actionRow}>
+                <TouchableOpacity onPress={()=>chatCustomer(item.phone_number)} style={styles.btnWA}><Text style={{color:'#FFF', fontWeight:'bold'}}>Chat WA</Text></TouchableOpacity>
+                <TouchableOpacity onPress={async()=>{await supabase.from('orders').update({status:'Selesai'}).eq('id',item.id); fetchOrders();}} style={styles.btnDone}><Text style={{color:'#FFF', fontWeight:'bold'}}>Selesaikan</Text></TouchableOpacity>
+              </View>
+            </View>
+          )} />
+        </View>
+      ) : role === 'owner' ? (
+        <View style={styles.center}><Text style={styles.title}>Login Owner</Text><TextInput style={styles.input} placeholder="Email" value={email} onChangeText={setEmail} autoCapitalize="none" /><TextInput style={styles.input} placeholder="Password" value={password} onChangeText={setPassword} secureTextEntry/><TouchableOpacity style={styles.btn} onPress={()=>{if(email==='admin@umkm.com'&&password==='123456')setIsLoggedIn(true); else Alert.alert("Gagal");}}><Text style={styles.btnText}>Masuk</Text></TouchableOpacity></View>
+      ) : (
+        <View style={{flex:1}}>
+           <View style={{height: 50}}><ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{paddingHorizontal:20}}>{categories.map(c=>(<TouchableOpacity key={c} onPress={()=>setSelectedCategory(c)} style={[styles.catChip, selectedCategory===c && styles.catChipActive]}><Text style={{color:selectedCategory===c?'#FFF':'#7F8C8D'}}>{c}</Text></TouchableOpacity>))}</ScrollView></View>
+           <FlatList data={products.filter(p => p.is_active === true && (selectedCategory === 'Semua' || p.category === selectedCategory))} numColumns={2} renderItem={({item})=>(
+            <TouchableOpacity style={styles.card} onPress={()=>{setSelectedProduct(item); setDetailVisible(true)}}>
+              <Image source={{uri: item.image_url}} style={styles.cardImg}/><Text style={styles.cardName}>{item.name}</Text><Text style={{color:'#27AE60', fontWeight:'bold'}}>Rp {item.price.toLocaleString()}</Text>
+            </TouchableOpacity>
+           )}/>
+        </View>
       )}
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  safeArea: { flex: 1, backgroundColor: '#FFF' },
-  landingContainer: { flex: 1, backgroundColor: '#F0F7FF', alignItems: 'center', justifyContent: 'center', padding: 30 },
-  landingLogo: { width: 100, height: 100, marginBottom: 20 },
-  landingTitle: { fontSize: 32, fontWeight: '900', color: '#2C3E50', marginBottom: 40 },
-  buttonGroup: { width: '100%' },
-  mainBtn: { backgroundColor: '#3498DB', width: '100%', padding: 18, borderRadius: 16, alignItems: 'center', flexDirection: 'row', justifyContent: 'center' },
-  mainBtnText: { color: '#fff', fontWeight: 'bold', fontSize: 16 },
-  backLink: { marginTop: 20 },
-  backLinkText: { color: '#7F8C8D' },
-  navBar: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, alignItems: 'center', paddingTop: 40 },
-  brandText: { fontSize: 22, fontWeight: 'bold' },
-  searchContainer: { flexDirection: 'row', backgroundColor: '#F0F3F4', margin: 20, padding: 12, borderRadius: 12, alignItems: 'center' },
-  searchInput: { flex: 1, marginLeft: 10 },
-  catChip: { paddingHorizontal: 15, paddingVertical: 8, backgroundColor: '#F8F9FA', marginRight: 10, borderRadius: 20, height: 40, justifyContent: 'center' },
+  container: { flex: 1, backgroundColor: '#FFF', paddingTop: Platform.OS === 'android' ? 30 : 0 },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 25 },
+  title: { fontSize: 32, fontWeight: 'bold', marginBottom: 30 },
+  input: { backgroundColor: '#F9F9F9', padding: 15, borderRadius: 12, marginBottom: 12, width:'100%', borderWidth:1, borderColor:'#EEE' },
+  btn: { backgroundColor: '#3498DB', padding: 18, borderRadius: 15, width:'100%', alignItems: 'center' },
+  btnText: { color: '#FFF', fontWeight: 'bold' },
+  navBar: { flexDirection: 'row', justifyContent: 'space-between', padding: 20, alignItems:'center', borderBottomWidth:1, borderColor:'#EEE' },
+  brand: { fontSize: 20, fontWeight: 'bold' },
+  card: { width: '45%', margin: '2.5%', padding: 10, backgroundColor: '#FFF', elevation: 5, borderRadius: 15 },
+  cardImg: { width: '100%', height: 110, borderRadius: 12 },
+  cardName: { fontWeight: 'bold', marginTop: 8 },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'center', alignItems: 'center' },
+  modalContent: { backgroundColor: '#FFF', padding: 25, borderRadius: 30, width: '92%' },
+  modalHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  modalTitle: { fontSize: 22, fontWeight: 'bold' },
+  cartItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 15, borderBottomWidth: 1, borderColor: '#EEE' },
+  qtyBox: { flexDirection: 'row', alignItems: 'center', backgroundColor:'#F0F0F0', borderRadius: 8, padding:5 },
+  qtyBtn: { backgroundColor: '#3498DB', padding: 5, borderRadius: 5 },
+  checkoutBtn: { backgroundColor: '#27AE60', padding: 18, borderRadius: 15, alignItems: 'center', marginTop: 20 },
+  badge: { position: 'absolute', right: -5, top: -5, backgroundColor: 'red', borderRadius: 10, width: 20, height: 20, justifyContent: 'center', alignItems: 'center' },
+  badgeTxt: { color: '#FFF', fontSize: 11, fontWeight:'bold' },
+  tabBar: { flexDirection: 'row', borderBottomWidth: 1, borderColor: '#EEE' },
+  tab: { flex: 1, padding: 15, alignItems: 'center' },
+  tabActive: { borderBottomWidth: 3, borderColor: '#3498DB' },
+  adminCard: { flexDirection: 'row', padding: 15, borderBottomWidth: 1, borderColor: '#EEE', alignItems: 'center' },
+  btnAddProd: { backgroundColor:'#3498DB', margin:15, padding:15, borderRadius:12, flexDirection:'row', justifyContent:'center', alignItems:'center' },
+  orderCard: { backgroundColor: '#F9F9F9', margin: 15, padding: 15, borderRadius: 20 },
+  orderHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  actionRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 15 },
+  btnWA: { backgroundColor: '#25D366', padding: 10, borderRadius: 10, flex: 0.48, alignItems: 'center', justifyContent: 'center' },
+  btnDone: { backgroundColor: '#3498DB', padding: 10, borderRadius: 10, flex: 0.48, alignItems: 'center', justifyContent: 'center' },
+  detailImg: { width: '100%', height: 220, borderRadius: 20, marginBottom: 20 },
+  detailName: { fontSize: 24, fontWeight: 'bold' },
+  detailPrice: { fontSize: 20, color: '#27AE60', fontWeight:'bold', marginVertical: 10 },
+  detailDesc: { color: '#7F8C8D', fontSize:15, lineHeight:22, marginBottom: 25 },
+  catChip: { paddingHorizontal: 15, paddingVertical: 8, backgroundColor: '#F8F9FA', marginRight: 10, borderRadius: 20, height: 40, justifyContent:'center' },
   catChipActive: { backgroundColor: '#3498DB' },
-  catChipText: { color: '#7F8C8D' },
-  catChipTextActive: { color: '#FFF', fontWeight: 'bold' },
-  inputGroup: { width: '100%', marginBottom: 20 },
-  formInput: { backgroundColor: '#FFF', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#D5DBDB' },
-  listPadding: { padding: 15 },
-  columnWrapper: { justifyContent: 'space-between' },
-  pCard: { backgroundColor: '#FFF', width: '48%', marginBottom: 15, borderRadius: 15, elevation: 3, overflow: 'hidden' },
-  pImg: { width: '100%', height: 120 },
-  pContent: { padding: 10 },
-  pName: { fontWeight: 'bold' },
-  pPrice: { color: '#27AE60', fontWeight: 'bold' },
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.6)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFF', height: height * 0.75, borderTopLeftRadius: 30, borderTopRightRadius: 30, padding: 25 },
-  closeBtn: { alignSelf: 'flex-end' },
-  detailImg: { width: '100%', height: 250, borderRadius: 20 },
-  detailInfo: { paddingVertical: 15 },
-  detailBadge: { backgroundColor: '#EBF5FB', padding: 5, borderRadius: 5, alignSelf: 'flex-start', marginBottom: 10 },
-  detailBadgeText: { color: '#3498DB', fontWeight: 'bold', fontSize: 10 },
-  detailName: { fontSize: 26, fontWeight: 'bold' },
-  detailPrice: { fontSize: 22, color: '#27AE60', fontWeight: 'bold', marginVertical: 10 },
-  detailDesc: { color: '#7F8C8D', lineHeight: 22, marginBottom: 25 },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 25 },
-  statCard: { backgroundColor: '#F0F7FF', width: '48%', padding: 20, borderRadius: 20, alignItems: 'center' },
-  statNum: { fontSize: 28, fontWeight: 'bold' },
-  statLabel: { color: '#7F8C8D', fontSize: 12 },
-  dummyChart: { height: 180, backgroundColor: '#F8F9FA', borderRadius: 20, justifyContent: 'center', alignItems: 'center' }
+  totalRow: { flexDirection:'row', justifyContent:'space-between', alignItems:'center' },
+  totalVal: { fontSize: 20, color:'#27AE60', fontWeight:'bold' },
+  divider: { height:1, backgroundColor:'#EEE', marginVertical:15 },
+  formSection: { paddingVertical:10 }
 });
