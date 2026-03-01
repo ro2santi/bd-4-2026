@@ -77,6 +77,13 @@ export default function AdminDashboardScreen() {
     ]);
   };
 
+  const chatCustomer = (phone) => {
+    // Jika nomor diawali '0', ganti jadi '62'
+    let formattedPhone = phone.startsWith('0') ? '62' + phone.slice(1) : phone;
+  
+    Linking.openURL(`whatsapp://send?phone=${formattedPhone}`);
+  };
+
   // --- TAMPILAN PER TAB ---
   
   // 1. TAB HOME (Statistik)
@@ -167,7 +174,7 @@ export default function AdminDashboardScreen() {
                   Status: {item.status || 'Baru'}
                 </Text>
                 <View style={styles.btnRow}>
-                  <TouchableOpacity style={styles.btnWA} onPress={() => Linking.openURL(`whatsapp://send?phone=${item.phone_number}`)}>
+                  <TouchableOpacity style={styles.btnWA} onPress={() => chatCustomer(item.phone_number)}>
                     <MaterialCommunityIcons name="whatsapp" size={18} color="#FFF" />
                     <Text style={{color:'#FFF', fontWeight:'bold', marginLeft:5}}>Chat WA</Text>
                   </TouchableOpacity>
